@@ -47,7 +47,16 @@
     const mid = FACE(r) ? r + s : s;
     return `<div class="${cls}" data-card="${c}" role="img" aria-label="${c}${isT ? " trump" : ""}"><span class="c-tl">${r}<small>${s}</small></span><span class="c-mid">${mid}</span></div>`;
   }
-  function show(screen) { ["home", "room", "game"].forEach(id => { $(id).hidden = id !== screen; }); }
+  let current = "home", portraitOk = false;
+  function show(screen) { current = screen; ["home", "room", "game"].forEach(id => { $(id).hidden = id !== screen; }); layout(); }
+  function layout() {
+    const wide = window.innerWidth > window.innerHeight;
+    const inGame = current === "game";
+    document.body.classList.toggle("land", inGame && wide);
+    $("rotate").hidden = !(inGame && !wide && !portraitOk && window.innerWidth < 760);
+  }
+  window.addEventListener("resize", layout);
+  window.addEventListener("orientationchange", () => setTimeout(layout, 200));
   function cfgText(c) {
     const who = c.n === 4 ? (c.teams ? "4 players in two pairs" : "4 players, everyone alone") : c.n + " players";
     const len = c.target === 1 ? "one deal" : "first to " + c.target + " bad points is the goat";
@@ -303,9 +312,19 @@
   };
   function leave() { try { app.peer && app.peer.destroy(); } catch (e) {} location.href = location.pathname; }
   $("leave").onclick = leave;
+  $("rot-skip").onclick = () => { portraitOk = true; layout(); };
+  $("g-full").onclick = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+        try { await screen.orientation.lock("landscape"); } catch (e) {}
+      } else await document.exitFullscreen();
+    } catch (e) { toast("Full screen isn't available here. Turn your phone sideways instead."); }
+  };
+  document.addEventListener("fullscreenchange", () => { $("g-full").textContent = document.fullscreenElement ? "Exit full screen" : "Full screen"; setTimeout(layout, 100); });
   $("g-leave").onclick = () => {
     if ($("g-leave").dataset.confirm) leave();
-    else { $("g-leave").dataset.confirm = "1"; $("g-leave").textContent = "Tap again to leave"; setTimeout(() => { delete $("g-leave").dataset.confirm; $("g-leave").textContent = "Leave game"; }, 3000); }
+    else { $("g-leave").dataset.confirm = "1"; $("g-leave").textContent = "Tap again"; setTimeout(() => { delete $("g-leave").dataset.confirm; $("g-leave").textContent = "Leave"; }, 3000); }
   };
 
   /* ---------- game screen ---------- */
@@ -381,13 +400,15 @@
   }
 
   function playRows(plays, winner, fx, done) {
-    return plays.map((pl, idx) => {
+    return `<div class="lt-groups">` + plays.map((pl, idx) => {
       const label = pl.kind === "lead" ? "led" : pl.kind === "beat" ? "beats" : "face down";
       const isWin = winner === pl.p;
-      const cls = ["play", isWin ? "win" : "", idx >= fx.newFrom && !done ? "enter" : "", isWin && done && fx.turnDone ? "fresh" : ""].join(" ");
-      return `<div class="${cls}" style="animation-delay:${done ? 0 : Math.max(0, idx - fx.newFrom) * 0.15}s"><div class="who">${esc(nameOf(pl.p))}<small>${label}</small>${isWin && done ? '<span class="tag-win">WINS</span>' : ""}</div>
-        <div class="cards">${pl.cards.map(c => cardHTML(c, "sm")).join("")}</div></div>`;
-    }).join("");
+      const cls = ["grp", isWin ? "win" : "", idx >= fx.newFrom && !done ? "enter" : "", isWin && done && fx.turnDone ? "fresh" : ""].join(" ");
+      const delay = done ? 0 : Math.max(0, idx - fx.newFrom) * 0.15;
+      return (idx ? `<span class="arrow" aria-hidden="true">›</span>` : "") +
+        `<div class="${cls}" style="animation-delay:${delay}s"><div class="gl">${esc(nameOf(pl.p))} <small>${label}</small>${isWin && done ? '<span class="tag-win">WINS</span>' : ""}</div>
+        <div class="gc">${pl.cards.map(c => cardHTML(c, "sm")).join("")}</div></div>`;
+    }).join("") + `</div>`;
   }
 
   function describe(pl, v) {
