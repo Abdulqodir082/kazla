@@ -228,7 +228,7 @@
         const a = E.botAction(s, botSeat);
         if (a) { try { E.apply(s, botSeat, a); } catch (e) { console.warn("bot", e); } }
         tick();
-      }, s.phase === "pick" ? 700 : 1000);
+      }, s.phase === "pick" ? 700 : (s.phase === "lead" && s.lastTurn && s.turn.plays.length === 0) ? 2800 : 1400);
     }
   }
 
@@ -320,22 +320,44 @@
     const hand = v.hand || [];
     app.selected.forEach(c => { if (!hand.includes(c)) app.selected.delete(c); });
 
-    // top bar
+    // what changed since the last screen (for animations)
+    const prev = app.prevView;
+    const sameDeal = !!(prev && prev.dealNo === v.dealNo && v.dealNo);
+    const turnDone = sameDeal && v.turnNo !== prev.turnNo;
+    let newFrom = 0;
+    if (sameDeal && !turnDone && prev.turn && v.turn && prev.turn.leader === v.turn.leader && !(v.turn.fourTrumps && !prev.turn.fourTrumps)) newFrom = prev.turn.plays.length;
+    const fx = {
+      newFrom, turnDone,
+      drawnCards: turnDone ? hand.filter(c => !(prev.hand || []).includes(c)) : [],
+      draws: turnDone ? (v.lastDraw || []) : [],
+      trumpChanged: sameDeal && v.hiddenCard && !prev.hiddenCard
+    };
+    if (fx.trumpChanged) toast(v.trump === E.suitOf(v.firstFaceUp) ? "Hidden card " + v.hiddenCard + ": trump stays " + E.suitName(v.trump) : "Trump changes to " + E.suitName(v.trump) + " " + v.trump + "!");
+    app.prevView = v;
+
+    // trump bar
+    const SN = { "♠": "Spades", "♥": "Hearts", "♦": "Diamonds", "♣": "Clubs" };
     $("g-deal").textContent = v.dealNo || "–";
-    $("g-trump").textContent = v.trump || "?";
-    $("g-trump").className = "v trumpv" + (v.trump && RED(v.trump) ? " red" : "");
-    $("g-stock").innerHTML = v.dealNo
-      ? `<span class="mono">${v.stockCount}</span>` + (v.faceUp ? cardHTML(v.faceUp, "xs") + `<span class="muted" style="font-size:.7rem">face up</span>` : "") +
-        (v.hiddenInStock ? cardHTML("back", "xs") + `<span class="muted" style="font-size:.7rem">hidden</span>` : v.hiddenCard ? `<span class="muted" style="font-size:.75rem">hidden was ${v.hiddenCard}</span>` : "")
-      : "–";
-    $("g-scores").innerHTML = v.sideNames.map((nm, i) => {
+    if (v.dealNo) {
+      $("g-trump").textContent = v.trump + " " + SN[v.trump];
+      $("g-trump").className = "tb-suit" + (RED(v.trump) ? " red" : "");
+      $("g-faceup").innerHTML = cardHTML(v.firstFaceUp, "sm", v.faceUp ? "" : "taken") + `<small>${v.faceUp ? "face up" : "taken"}</small>`;
+      $("g-hidden").innerHTML = v.hiddenCard
+        ? cardHTML(v.hiddenCard, "sm") + `<small>hidden card</small>`
+        : cardHTML("back", "sm") + `<small>hidden</small>`;
+      $("g-deck").textContent = v.stockCount
+        ? v.stockCount + " card" + (v.stockCount === 1 ? "" : "s") + " left in the deck" + (v.hiddenInStock ? ". The last one is hidden and can change the trump." : "")
+        : (v.hiddenCard && v.trump !== E.suitOf(v.firstFaceUp) ? "Deck is empty. The hidden card changed the trump." : "Deck is empty.");
+      if (fx.trumpChanged) { const tb = $("g-trumpbar"); tb.classList.remove("changed"); void tb.offsetWidth; tb.classList.add("changed"); }
+    }
+    $("g-scores").innerHTML = `<span class="scores-k">Bad points</span>` + v.sideNames.map((nm, i) => {
       const mine = (v.teams ? me % 2 : me) === i;
       const pct = v.target === 1 ? Math.min(100, v.sideBad[i] / 6 * 100) : Math.min(100, v.sideBad[i] / v.target * 100);
       const short = v.teams ? "Team " + (i === 0 ? "A" : "B") : v.players[i].name;
       return `<div class="chip score ${mine ? "mine" : ""}"><span class="k">${esc(short)}${mine ? " · you" : ""}</span>
         <span class="v mono">${v.sideBad[i]}${v.target > 1 ? ` <span class="muted" style="font-size:.8rem">/ ${v.target}</span>` : ""}</span>
         <span class="bar"><i style="width:${pct}%"></i></span></div>`;
-    }).join("") + (v.eggs ? `<div class="chip"><span class="k">Eggs</span><span class="v">×2 next</span></div>` : "");
+    }).join("") + (v.eggs ? `<div class="chip"><span class="k">Eggs</span><span class="v">×2 next deal</span></div>` : "");
 
     // opponents
     const waiting = v.phase === "pick" ? v.pick.current : v.turn ? (v.phase === "lead" ? v.turn.leader : v.turn.toAct) : -1;
@@ -344,33 +366,51 @@
       const p = v.players[i];
       const partner = v.teams && i % 2 === me % 2;
       const team = v.teams ? `<span class="${sideCls(p.side)}" style="font-size:.75rem">${partner ? "partner" : "Team " + (p.side === 0 ? "A" : "B")}</span>` : "";
-      return `<div class="opp ${waiting === i ? "turn" : ""}"><div class="nm"><span>${esc(p.name)}${p.bot ? ' <span class="muted" style="font-size:.75rem">bot</span>' : ""}</span>${team}</div>
+      const d = fx.draws.find(x => x.p === i);
+      const drew = d ? ` <span class="badge">draws ${d.n}</span>` : "";
+      const turnTag = waiting === i ? ` <span class="badge gold">${v.phase === "lead" ? "leading" : "thinking"}</span>` : "";
+      return `<div class="opp ${waiting === i ? "turn" : ""}"><div class="nm"><span>${esc(p.name)}${p.bot ? ' <span class="muted" style="font-size:.75rem">bot</span>' : ""}${turnTag}${drew}</span>${team}</div>
         <div class="backs">${Array(p.count).fill(cardHTML("back", "xs")).join("") || '<span class="muted" style="font-size:.8rem">no cards</span>'}</div></div>`;
     }).join("");
 
-    renderTable(v);
-    renderControls(v);
+    renderTable(v, fx);
+    renderControls(v, fx);
 
     $("g-log").innerHTML = v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join("");
     renderOverlay(v);
   }
 
-  function renderTable(v) {
+  function playRows(plays, winner, fx, done) {
+    return plays.map((pl, idx) => {
+      const label = pl.kind === "lead" ? "led" : pl.kind === "beat" ? "beats" : "face down";
+      const isWin = winner === pl.p;
+      const cls = ["play", isWin ? "win" : "", idx >= fx.newFrom && !done ? "enter" : "", isWin && done && fx.turnDone ? "fresh" : ""].join(" ");
+      return `<div class="${cls}" style="animation-delay:${done ? 0 : Math.max(0, idx - fx.newFrom) * 0.15}s"><div class="who">${esc(nameOf(pl.p))}<small>${label}</small>${isWin && done ? '<span class="tag-win">WINS</span>' : ""}</div>
+        <div class="cards">${pl.cards.map(c => cardHTML(c, "sm")).join("")}</div></div>`;
+    }).join("");
+  }
+
+  function describe(pl, v) {
+    const k = pl.cards.length, nm = esc(nameOf(pl.p));
+    if (pl.kind === "lead") return `${nm} ${v.turn && v.turn.fourTrumps ? "plays FOUR TRUMPS" : "leads " + k + " card" + (k > 1 ? "s" : "")}`;
+    if (pl.kind === "beat") return `${nm} beats ${k > 1 ? "all " + k + " cards" : "it"}`;
+    return `${nm} throws ${k} card${k > 1 ? "s" : ""} face down`;
+  }
+
+  function renderTable(v, fx) {
     const t = v.turn;
     let html = "";
     if (t && t.plays.length) {
-      html += `<div class="head"><span>${t.fourTrumps ? "Four trumps! " : ""}Led by ${esc(nameOf(t.leader))}</span><span>Beat each card, or throw face down</span></div>`;
-      html += t.plays.map(pl => {
-        const label = pl.kind === "lead" ? "led" : pl.kind === "beat" ? "beats" : "face down";
-        return `<div class="play ${t.winning === pl.p ? "win" : ""}"><div class="who">${esc(nameOf(pl.p))}<small>${label}</small></div>
-          <div class="cards">${pl.cards.map(c => cardHTML(c, "sm")).join("")}</div></div>`;
-      }).join("");
+      html += `<div class="event">${describe(t.plays[t.plays.length - 1], v)}</div>`;
+      html += playRows(t.plays, t.winning, fx, false);
     } else if (v.lastTurn && v.dealNo) {
       const lt = v.lastTurn;
-      html += `<div class="empty-table"><span>${esc(nameOf(lt.winner))} took the last turn (${lt.points} pts).</span>
-        <div class="row">${lt.plays.flatMap(p => p.cards).map(c => cardHTML(c, "xs")).join("")}</div></div>`;
+      const draws = (v.lastDraw || []).map(d => (d.p === v.me ? "you" : esc(v.players[d.p].name)) + " " + d.n).join(", ");
+      html += `<div class="event">${esc(nameOf(lt.winner))} wins the turn and takes ${lt.count} cards</div>`;
+      html += playRows(lt.plays, lt.winner, fx, true);
+      html += `<div class="head"><span>${draws ? "Drawing from the deck, winner first: " + draws : "No cards left to draw."}</span><span>${esc(nameOf(lt.winner))} leads next</span></div>`;
     } else {
-      html += `<div class="empty-table"><span>The table is empty.</span></div>`;
+      html += `<div class="empty-table"><span>${v.dealNo ? esc(nameOf(v.turn ? v.turn.leader : 0)) + " leads the first turn." : "The table is empty."}</span></div>`;
     }
     $("g-table").innerHTML = html;
   }
@@ -381,10 +421,17 @@
     return [];
   }
 
-  function renderControls(v) {
+  function cheapest(hand, k, trump) {
+    const cost = c => (E.suitOf(c) === trump ? 40 : 0) + E.pts(c) * 2 + E.power(c);
+    return hand.slice().sort((a, b) => cost(a) - cost(b)).slice(0, k);
+  }
+
+  function renderControls(v, fx) {
+    fx = fx || { drawnCards: [], draws: [] };
     const me = v.me, hand = v.hand || [], t = v.turn;
     const sel = [...app.selected];
-    let status = "", mine = false, buttons = [];
+    let status = "", mine = false, buttons = [], hint = "";
+    const myDraw = (fx.draws || []).find(d => d.p === me);
     if (["lead", "answer"].includes(v.phase) && t) {
       if (v.phase === "lead" && t.leader === me) {
         mine = true;
@@ -396,12 +443,14 @@
         mine = true;
         const k = t.plays[0].cards.length;
         const partnerWins = v.teams && t.winning % 2 === me % 2;
-        status = `Your answer: pick ${k} card${k > 1 ? "s" : ""}. Beat every winning card, or throw face down.`;
-        if (partnerWins) status = `Your partner is winning. Throw ${k} card${k > 1 ? "s" : ""} face down (high points help your team), or beat anyway.`;
+        status = `Your answer: beat all ${k > 1 ? k + " cards" : "of it"}, or throw ${k} face down.`;
+        if (partnerWins) status = `Your partner is winning. Throw ${k} face down (high points help your team), or beat anyway.`;
         const canBeat = sel.length === k && E.findAssignment(sel, winningCards(v), v.trump);
         buttons.push(`<button type="button" class="btn" data-act="beat" ${canBeat ? "" : "disabled"}>Beat</button>`);
-        buttons.push(`<button type="button" class="btn ghost" data-act="throw" ${sel.length === k ? "" : "disabled"}>Throw ${k} face down</button>`);
-        if (sel.length === k && !canBeat) status += " These cards can't beat all of them.";
+        buttons.push(`<button type="button" class="btn ghost" data-act="throw">Throw ${k} face down</button>`);
+        hint = sel.length === k ? (canBeat ? "Beat with the selected cards, or throw them face down." : "These cards can't beat all of them. You can still throw them face down.")
+          : sel.length === 0 ? `Select ${k} card${k > 1 ? "s" : ""} to beat. Throw face down without selecting and your ${k > 1 ? k + " lowest cards go" : "lowest card goes"}.`
+          : `Select ${k} card${k > 1 ? "s" : ""} (you have ${sel.length}).`;
       } else {
         const w = v.phase === "lead" ? t.leader : t.toAct;
         status = `Waiting for ${esc(v.players[w].name)}…`;
@@ -411,12 +460,15 @@
       status = "Deciding who goes first…";
     } else if (v.phase === "dealEnd") status = "Deal over.";
     else if (v.phase === "gameOver") status = "Game over.";
+    if (myDraw) status = `<span class="badge">You drew ${myDraw.n}</span> ` + status;
     $("g-status").innerHTML = status;
     $("g-status").className = "status" + (mine ? " mine" : "");
-    $("g-actions").innerHTML = buttons.join("");
+    $("g-actions").innerHTML = buttons.join("") + (hint ? `<span class="hint">${hint}</span>` : "");
     $("g-hand").className = "hand" + (mine || v.canFour ? "" : " off");
-    $("g-hand").innerHTML = hand.map(c => cardHTML(c, "", app.selected.has(c) ? "sel" : "")).join("") ||
-      `<span class="muted">No cards in hand.</span>`;
+    $("g-hand").innerHTML = hand.map((c, i) => {
+      const isNew = (fx.drawnCards || []).includes(c);
+      return cardHTML(c, "", (app.selected.has(c) ? "sel " : "") + (isNew ? "drawn" : "")).replace('class="card', isNew ? `style="animation-delay:${i * 0.08}s" class="card` : 'class="card');
+    }).join("") || `<span class="muted">No cards in hand.</span>`;
   }
 
   $("g-hand").addEventListener("click", e => {
@@ -427,9 +479,15 @@
   });
   $("g-actions").addEventListener("click", e => {
     const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
-    const type = b.dataset.act;
+    const type = b.dataset.act, v = app.view;
     if (type === "four") act({ type: "four" });
-    else act({ type, cards: [...app.selected] });
+    else if (type === "throw") {
+      const k = v.turn.plays[0].cards.length;
+      let cards = [...app.selected];
+      if (cards.length === 0) cards = cheapest(v.hand, k, v.trump);
+      else if (cards.length !== k) { toast(`Select exactly ${k} card${k > 1 ? "s" : ""}, or none to throw your lowest.`); return; }
+      act({ type: "throw", cards });
+    } else act({ type, cards: [...app.selected] });
     app.selected.clear();
   });
 

@@ -107,8 +107,10 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .trumpv { font-size: 1.5rem !important; line-height: 1; }
 .trumpv.red { color: var(--red); }
 .stockw { display: flex; gap: 6px; align-items: center; }
-.scores { display: flex; gap: 8px; flex-wrap: wrap; flex: 1; }
-.score { flex: 1; min-width: 120px; }
+.scores { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; }
+.scores-k { grid-column: 1 / -1; font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; margin-bottom: -4px; }
+.score { min-width: 0; padding: 6px 10px; }
+.score .k { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .score .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
 .score .bar i { display: block; height: 100%; background: var(--red); }
 .score.mine .v { color: var(--accent); }
@@ -142,6 +144,33 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .log { font-size: .85rem; color: var(--muted); display: grid; gap: 3px; max-height: 180px; overflow: auto; }
 details summary { cursor: pointer; font-weight: 600; }
 
+/* trump bar */
+.trumpbar { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.tb-info { display: grid; gap: 2px; min-width: 0; }
+.tb-info .k { font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); font-weight: 600; }
+.tb-suit { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; line-height: 1.1; }
+.tb-suit.red { color: var(--red); }
+.tb-deck { font-size: .85rem; color: var(--muted); }
+.tb-card { display: grid; justify-items: center; gap: 3px; }
+.tb-card small { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.tb-card .card.taken { opacity: .45; }
+.trumpbar.changed { animation: flash 1.2s ease 2; }
+@keyframes flash { 50% { box-shadow: 0 0 0 4px var(--gold); } }
+
+/* animation */
+@keyframes enter { from { opacity: 0; transform: translateY(-18px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes drawn { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: none; } }
+@keyframes pop { 0% { transform: scale(.6); opacity: 0; } 40% { transform: scale(1.15); opacity: 1; } 100% { transform: none; opacity: 1; } }
+@keyframes winglow { 0%,100% { box-shadow: 0 0 0 0 rgba(229,181,74,0); } 50% { box-shadow: 0 0 0 6px rgba(229,181,74,.35); } }
+.play.enter { animation: enter .45s cubic-bezier(.2,.8,.2,1); }
+.play.win.fresh { animation: winglow 1.1s ease 2; }
+.hand .card.drawn { animation: drawn .5s cubic-bezier(.2,.8,.2,1) backwards; }
+.badge { display: inline-block; font-size: .75rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--surface); animation: pop .5s ease; }
+.badge.gold { background: var(--gold); color: #1b1405; }
+.event { font-weight: 600; font-size: .95rem; color: var(--felt-ink); background: rgba(0,0,0,.18); padding: 8px 12px; border-radius: 10px; animation: enter .4s ease; }
+.play .tag-win { font-size: .68rem; font-weight: 700; color: #1b1405; background: var(--gold); padding: 1px 6px; border-radius: 4px; justify-self: start; margin-top: 2px; }
+.hint { font-size: .85rem; color: var(--muted); }
+
 /* overlays */
 .overlay { position: fixed; inset: 0; background: rgba(10,14,18,.55); display: grid; place-items: center; z-index: 20;
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
@@ -167,7 +196,7 @@ details summary { cursor: pointer; font-weight: 600; }
   .hand .card { width: 62px; height: 90px; }
   .play .who { width: 70px; }
 }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>
@@ -231,12 +260,16 @@ details summary { cursor: pointer; font-weight: 600; }
 
   <!-- GAME -->
   <section id="game" hidden class="wrap" style="padding:0">
-    <div class="topbar">
-      <div class="chip"><span class="k">Deal</span><span class="v mono" id="g-deal">1</span></div>
-      <div class="chip"><span class="k">Trump</span><span class="v trumpv" id="g-trump">♥</span></div>
-      <div class="chip"><span class="k">Deck</span><span class="stockw" id="g-stock"></span></div>
-      <div class="scores" id="g-scores"></div>
+    <div class="trumpbar" id="g-trumpbar">
+      <div class="tb-card" id="g-faceup"></div>
+      <div class="tb-info">
+        <span class="k">Trump · deal <span id="g-deal">1</span></span>
+        <span class="tb-suit" id="g-trump">♥ Hearts</span>
+        <span class="tb-deck" id="g-deck"></span>
+      </div>
+      <div class="tb-card" id="g-hidden"></div>
     </div>
+    <div class="scores" id="g-scores"></div>
     <div class="opps" id="g-opps"></div>
     <div class="table" id="g-table"></div>
     <div class="panel">

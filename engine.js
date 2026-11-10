@@ -155,6 +155,8 @@
     s.piles = Array(s.sides).fill(null).map(() => []);
     s.took = Array(s.sides).fill(false);
     s.lastWinner = null;
+    s.lastTurn = null;
+    s.lastDraw = [];
     s.phase = "lead";
     s.turn = newTurn(s.firstLeader);
     addLog(s, "Deal " + s.dealNo + ". Face-up card " + s.faceUp + ": " + suitName(s.trump) + " are trump.");
@@ -246,14 +248,17 @@
     s.piles[side].push(...all);
     s.took[side] = true;
     s.lastWinner = w;
-    s.lastTurn = { plays: s.turn.plays, winner: w, points: sum(all) };
-    addLog(s, s.players[w].name + " takes " + all.length + " cards (" + sum(all) + " pts)");
+    s.lastTurn = { plays: s.turn.plays, winner: w, count: all.length };
+    s.lastDraw = [];
+    s.turnNo = (s.turnNo || 0) + 1;
+    addLog(s, s.players[w].name + " wins the turn and takes " + all.length + " cards");
     // draw back up to 4: winner first, then clockwise
     if (s.stock.length) {
       const need = HAND - s.players[w].hand.length;
       const per = Math.min(need, Math.floor(s.stock.length / s.n));
       for (let k = 0; k < s.n; k++) {
         const pi = (w + k) % s.n;
+        if (per > 0) s.lastDraw.push({ p: pi, n: per });
         for (let j = 0; j < per; j++) {
           const c = s.stock.shift();
           s.players[pi].hand.push(c);
@@ -345,10 +350,13 @@
       v.firstFaceUp = s.faceUp;
       v.pileCounts = s.piles.map(p => p.length);
       v.mySide = sideOf(s, me);
-      const hide = pl => ({ p: pl.p, kind: pl.kind, cards: pl.kind === "throw" && pl.p !== me ? pl.cards.map(() => "back") : pl.cards });
+      // face-down cards stay secret from everyone, including the player who threw them
+      const hide = pl => ({ p: pl.p, kind: pl.kind, cards: pl.kind === "throw" ? pl.cards.map(() => "back") : pl.cards });
       v.turn = s.turn && { leader: s.turn.leader, toAct: s.turn.toAct, fourTrumps: s.turn.fourTrumps,
         winning: s.turn.winning && s.turn.winning.p, plays: s.turn.plays.map(hide) };
-      v.lastTurn = s.lastTurn && { winner: s.lastTurn.winner, points: s.lastTurn.points, plays: s.lastTurn.plays.map(hide) };
+      v.lastTurn = s.lastTurn && { winner: s.lastTurn.winner, count: s.lastTurn.count, plays: s.lastTurn.plays.map(hide) };
+      v.lastDraw = s.lastDraw || [];
+      v.turnNo = s.turnNo || 0;
       v.canFour = canFourTrumps(s, me);
       if (["dealEnd", "gameOver"].includes(s.phase)) v.piles = s.piles.map(sum);
     }
