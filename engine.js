@@ -358,7 +358,10 @@
       v.lastDraw = s.lastDraw || [];
       v.turnNo = s.turnNo || 0;
       v.canFour = canFourTrumps(s, me);
-      if (["dealEnd", "gameOver"].includes(s.phase)) v.piles = s.piles.map(sum);
+      if (["dealEnd", "gameOver"].includes(s.phase)) {
+        v.piles = s.piles.map(sum);
+        v.myPile = sortHand(s.piles[sideOf(s, me)].slice(), s.trump);
+      }
     }
     return v;
   }

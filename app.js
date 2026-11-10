@@ -515,6 +515,21 @@
     if (o === "black") return "Black ♠♣";
     return o;
   }
+  function pileHTML(v) {
+    const pile = v.myPile;
+    const who = v.teams ? "your team" : "you";
+    if (!pile.length) return `<div class="pile"><h3>Cards ${who} won</h3><p class="muted">No cards this deal.</p></div>`;
+    const suits = ["♠", "♥", "♦", "♣"].sort((a, b) => (a === v.trump) - (b === v.trump));
+    const rows = suits.map(su => {
+      const cs = pile.filter(c => E.suitOf(c) === su).sort((a, b) => E.power(b) - E.power(a));
+      if (!cs.length) return "";
+      const pts = E.sum(cs);
+      return `<div class="pile-row"><span class="pile-suit ${RED(su) ? "red" : ""}">${su}${su === v.trump ? '<small>trump</small>' : ""}</span>
+        <div class="pile-cards">${cs.map(c => cardHTML(c, "sm", E.pts(c) ? "" : "zero")).join("")}</div>
+        <span class="pile-pts mono">${pts}</span></div>`;
+    }).join("");
+    return `<div class="pile"><h3>Cards ${who} won · ${pile.length} cards · <span class="mono">${E.sum(pile)}</span> points</h3>${rows}</div>`;
+  }
   function renderOverlay(v) {
     const ov = $("overlay"), m = $("modal");
     let html = null;
@@ -544,7 +559,7 @@
       } else html += `<h2>Deal over</h2>`;
       if (r.eggs) html += `<p class="warn">60 : 60, eggs! Nobody gets bad points. Next deal counts double.</p>`;
       if (r.doubled) html += `<p class="warn">This deal counted double because of eggs.</p>`;
-      html += `<div style="overflow-x:auto"><table class="res"><thead><tr><th>Player</th><th style="text-align:right">Card pts</th><th style="text-align:right">Bad</th><th style="text-align:right">Total bad</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      html += `<div class="res-grid"><div style="overflow-x:auto"><table class="res"><thead><tr><th>Player</th><th style="text-align:right">Card pts</th><th style="text-align:right">Bad</th><th style="text-align:right">Total bad</th></tr></thead><tbody>${rows}</tbody></table></div>${v.myPile ? pileHTML(v) : ""}</div>`;
       if (v.target > 1 && v.phase === "dealEnd") html += `<p class="muted">First to ${v.target} bad points is the goat.</p>`;
       html += isHost
         ? `<div class="row"><button type="button" class="btn" data-next="1">${v.phase === "gameOver" ? "Play again" : "Next deal"}</button>${v.phase === "gameOver" ? `<button type="button" class="btn ghost" data-leave="1">Leave</button>` : ""}</div>`
