@@ -1,9 +1,9 @@
-/* Kozel Online: lobby, peer-to-peer networking (host is authoritative), and UI. */
+/* Kazla: lobby, networking (host is authoritative, see net.js), and UI. */
 (function () {
   "use strict";
   const E = window.KozelEngine;
   const $ = id => document.getElementById(id);
-  const PREFIX = "kozel-v1-";
+  const BROKER_Q = new URLSearchParams(location.search).get("broker") ? "broker=" + encodeURIComponent(new URLSearchParams(location.search).get("broker")) : "";
   const RED = s => s === "♥" || s === "♦";
   const FACE = r => r === "J" || r === "Q" || r === "K";
 
@@ -18,7 +18,7 @@
     role: null,          // "host" | "client"
     seat: null,          // my seat index
     code: null,
-    peer: null,
+    net: null,
     online: false,
     conns: [],           // host: per seat connection
     seats: [],           // host: [{name, kind: host|remote|bot|empty, token, online}]
@@ -29,7 +29,7 @@
     selected: new Set(),
     botTimer: null,
     dealTimer: null,
-    hostConn: null       // client only
+    offlineTimer: null
   };
 
   /* ---------- helpers ---------- */
@@ -68,7 +68,7 @@
     return s;
   }
   function inviteLink(code) {
-    return location.origin + location.pathname + "?room=" + code;
+    return location.origin + location.pathname + "?room=" + code + (BROKER_Q ? "&" + BROKER_Q : "");
   }
 
   /* ---------- home screen ---------- */
@@ -118,26 +118,22 @@
     startHostPeer();
   }
 
-  function startHostPeer(retry) {
-    if (typeof Peer === "undefined") { setOffline("The online library didn't load. You can still play against bots."); return; }
-    let peer;
-    try { peer = new Peer(PREFIX + app.code); }
-    catch (e) { setOffline("Online play isn't available here. You can still play against bots."); return; }
-    app.peer = peer;
-    peer.on("open", () => { app.online = true; $("room-warn").hidden = true; renderRoom(); });
-    peer.on("connection", conn => {
-      conn.on("data", msg => hostOnMessage(conn, msg));
-      conn.on("close", () => hostOnClose(conn));
-      conn.on("error", () => hostOnClose(conn));
-    });
-    peer.on("disconnected", () => { try { peer.reconnect(); } catch (e) {} });
-    peer.on("error", err => {
-      if (err && err.type === "unavailable-id" && !retry) {
-        app.code = makeCode(); try { peer.destroy(); } catch (e) {}
-        renderRoom(); startHostPeer(true); return;
-      }
-      if (!app.online) setOffline("Couldn't go online (" + (err && err.type || "network") + "). You can still play against bots.");
-    });
+  async function startHostPeer() {
+    if (!window.KazlaNet || !KazlaNet.supported()) { setOffline("Online play isn't available in this browser. You can still play against bots."); return; }
+    try {
+      app.net = await KazlaNet.host(app.code, {
+        onMessage: hostOnMessage,
+        onClose: hostOnClose,
+        onStatus: up => {
+          const was = app.online;
+          app.online = up || app.net && app.net.connected();
+          if (app.online) { $("room-warn").hidden = true; clearTimeout(app.offlineTimer); }
+          if (app.online && !was && app.state) broadcastAll(); // resend everything after a reconnect
+          renderRoom();
+        }
+      });
+      app.offlineTimer = setTimeout(() => { if (!app.online) setOffline("Still trying to go online… Check your internet connection. You can play against bots meanwhile."); }, 12000);
+    } catch (e) { setOffline("Couldn't go online. You can still play against bots."); }
   }
   function setOffline(msg) { app.online = false; $("room-warn").textContent = msg; $("room-warn").hidden = false; renderRoom(); }
 
@@ -242,35 +238,33 @@
   }
 
   /* ================= CLIENT ================= */
-  function clientJoin(code) {
+  async function clientJoin(code) {
     if (!/^[A-Z]{5}$/.test(code)) { $("join-msg").textContent = "Enter the 5-letter code from the host."; return; }
-    if (typeof Peer === "undefined") { $("join-msg").textContent = "The online library didn't load. Check your connection and reload."; return; }
+    if (!window.KazlaNet || !KazlaNet.supported()) { $("join-msg").textContent = "The online part didn't load. Check your internet connection and reload the page."; return; }
     store.set("kozel-name", myName());
     app.role = "client"; app.code = code;
     $("join-msg").textContent = "Connecting…";
-    let peer;
-    try { peer = new Peer(); }
-    catch (e) { $("join-msg").textContent = "Online play isn't available in this browser."; return; }
-    app.peer = peer;
-    const fail = setTimeout(() => {
-      if (!app.hostConn || !app.hostConn.open) $("join-msg").textContent = "Couldn't reach room " + code + ". Check the code, and ask the host to keep their page open.";
-    }, 12000);
-    peer.on("open", () => {
-      const conn = peer.connect(PREFIX + code, { reliable: true });
-      app.hostConn = conn;
-      conn.on("open", () => { clearTimeout(fail); conn.send({ t: "join", name: myName(), token }); });
-      conn.on("data", clientOnMessage);
-      conn.on("close", () => { toast("Disconnected from the host."); $("room-status").textContent = "Disconnected from the host."; });
-    });
-    peer.on("error", err => {
-      if (err && err.type === "peer-unavailable") $("join-msg").textContent = "No room with code " + code + ". Check the code with the host.";
-      else $("join-msg").textContent = "Connection problem (" + (err && err.type || "network") + ").";
-    });
+    $("join").disabled = true;
+    const hello = () => app.net.send({ t: "join", name: myName(), token }, true);
+    try {
+      app.net = await KazlaNet.join(code, KazlaNet.rand(8), {
+        onOpen: () => { $("join-msg").textContent = "Found the room. Joining…"; hello(); },
+        onReconnect: () => hello(),
+        onMessage: clientOnMessage,
+        onHostGone: () => toast("The host went offline. Waiting for them to come back…"),
+        onError: kind => {
+          $("join").disabled = false;
+          $("join-msg").textContent = kind === "no-room"
+            ? "No open room with code " + code + ". Check the code, and make sure the host's page is still open."
+            : "Couldn't reach the game server. Check your internet connection, or try switching between Wi-Fi and mobile data.";
+        }
+      });
+    } catch (e) { $("join").disabled = false; $("join-msg").textContent = "Couldn't connect: " + e.message; }
   }
   function clientOnMessage(msg) {
     if (!msg || typeof msg !== "object") return;
-    if (msg.t === "welcome") { app.seat = msg.seat; $("join-msg").textContent = ""; history.replaceState(null, "", "?room=" + app.code); }
-    else if (msg.t === "reject") { $("join-msg").textContent = msg.reason; show("home"); }
+    if (msg.t === "welcome") { app.seat = msg.seat; $("join-msg").textContent = ""; $("join").disabled = false; history.replaceState(null, "", "?room=" + app.code + (BROKER_Q ? "&" + BROKER_Q : "")); }
+    else if (msg.t === "reject") { $("join-msg").textContent = msg.reason; $("join").disabled = false; show("home"); }
     else if (msg.t === "lobby") { app.lobby = msg.lobby; if (!msg.lobby.started) { show("room"); renderRoom(); } }
     else if (msg.t === "view") { app.view = msg.view; show("game"); renderGame(); }
     else if (msg.t === "error") toast(msg.msg);
@@ -279,7 +273,7 @@
   /* ---------- actions from the UI ---------- */
   function act(a) {
     if (app.role === "host") hostDispatch(0, a);
-    else send(app.hostConn, { t: "act", a });
+    else if (app.net) app.net.send({ t: "act", a });
   }
 
   /* ---------- room screen ---------- */
@@ -310,7 +304,10 @@
     try { navigator.clipboard.writeText(link).then(() => toast("Invite link copied"), () => toast("Copy the link below")); }
     catch (e) { toast("Copy the link below"); }
   };
-  function leave() { try { app.peer && app.peer.destroy(); } catch (e) {} location.href = location.pathname; }
+  function leave() {
+    try { app.net && app.net.close(); } catch (e) {}
+    setTimeout(() => { location.href = location.pathname + (BROKER_Q ? "?" + BROKER_Q : ""); }, 400);
+  }
   $("leave").onclick = leave;
   $("rot-skip").onclick = () => { portraitOk = true; layout(); };
   $("g-full").onclick = async () => {
@@ -562,6 +559,7 @@
     if (e.target.closest("[data-leave]")) leave();
   });
 
+  window.addEventListener("pagehide", () => { if (app.role === "client" && app.net) try { app.net.close(); } catch (e) {} });
   window.addEventListener("beforeunload", e => {
     if (app.role === "host" && app.state && app.state.phase !== "gameOver") { e.preventDefault(); e.returnValue = ""; }
   });

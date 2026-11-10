@@ -15,7 +15,13 @@ After about a minute the game is at `https://<username>.github.io/kazla/`.
 
 ## How online play works
 
-The host's browser runs the game and talks to the other players directly (WebRTC via
-PeerJS's free public signalling server). There is no backend, so it runs on GitHub Pages.
+The host's browser runs the game. Players' messages travel through free public MQTT
+relays (EMQX, with HiveMQ as a second option) over secure WebSockets, so it works on
+mobile data and Wi-Fi without any direct device-to-device connection. Every message is
+end-to-end encrypted (ECDH key exchange + AES-GCM), so the relay and anyone listening
+can't see the cards. There is no backend of our own, so it runs on GitHub Pages.
+
 The host has to keep their tab open for the whole game. Players who drop can rejoin
 with the same link.
+
+For local testing you can point the page at your own broker: `?broker=ws://localhost:8888`.
