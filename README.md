@@ -25,3 +25,8 @@ The host has to keep their tab open for the whole game. Players who drop can rej
 with the same link.
 
 For local testing you can point the page at your own broker: `?broker=ws://localhost:8888`.
+
+## Releasing a change
+
+After changing `app.js`, `engine.js` or `net.js`, bump the `?v=` value on their
+`<script>` tags in `index.html` so phones load the new code instead of a cached copy.
