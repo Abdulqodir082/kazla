@@ -38,14 +38,60 @@
     clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 2600);
   }
   function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
-  function cardHTML(c, size, extra) {
+  const C = window.KazlaCards;
+  document.body.insertAdjacentHTML("afterbegin", C.sprite());
+  document.documentElement.style.setProperty("--back", `url("${C.BACK}")`);
+  const RUNAME = { A: "ace", K: "king", Q: "queen", J: "jack" };
+  // \uFE0E asks for the plain text symbol, not the emoji, so ♥ stays a card suit on phones
+  const sym = x => `<span class="sym ${RED(x) ? "red" : ""}">${x}\uFE0E</span>`;
+  function cardHTML(c, size, extra, style) {
     size = size || "";
-    if (c === "back") return `<div class="card back ${size}" aria-label="face-down card"></div>`;
+    const st = style ? ` style="${style}"` : "";
+    if (c === "back") return `<div class="card back ${size} ${extra || ""}"${st} role="img" aria-label="face-down card"></div>`;
     const s = c.slice(-1), r = c.slice(0, -1);
     const isT = app.view && app.view.trump === s;
-    const cls = ["card", size, RED(s) ? "red" : "", FACE(r) ? "face" : "", isT ? "trump" : "", extra || ""].join(" ");
-    const mid = FACE(r) ? r + s : s;
-    return `<div class="${cls}" data-card="${c}" role="img" aria-label="${c}${isT ? " trump" : ""}"><span class="c-tl">${r}<small>${s}</small></span><span class="c-mid">${mid}</span></div>`;
+    const cls = ["card", size, isT ? "trump" : "", extra || ""].join(" ");
+    const label = (RUNAME[r] || r) + " of " + E.suitName(s) + (isT ? ", trump" : "");
+    return `<div class="${cls}" data-card="${c}"${st} role="img" aria-label="${label}">${C.svg(c)}</div>`;
+  }
+
+  /* ---------- motion helpers ---------- */
+  const RM = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  function center(r) { return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }
+  /** Animate an element from where `from` (a rect) is to where it now sits. */
+  function flyIn(el, from, delay, rot) {
+    if (RM || !from || !el.animate) return;
+    const to = el.getBoundingClientRect();
+    if (!to.width) return;
+    const a = center(from), b = center(to);
+    const end = getComputedStyle(el).transform;
+    const sc = Math.max(.35, Math.min(1.6, from.width / to.width));
+    el.animate([
+      { transform: `translate(${a.x - b.x}px, ${a.y - b.y}px) scale(${sc}) rotate(${rot == null ? -14 : rot}deg)`, opacity: .9 },
+      { transform: end === "none" ? "none" : end, opacity: 1 }
+    ], { duration: 460, delay: delay || 0, easing: "cubic-bezier(.2,.8,.2,1)", fill: "backwards" });
+  }
+  /** A card back that flies from one rect to another and disappears (deal / draw for others). */
+  function ghost(from, to, delay, cw) {
+    if (RM || !from || !to || !document.body.animate) return;
+    const g = document.createElement("div");
+    g.className = "card back fly";
+    g.style.setProperty("--cw", cw + "px");
+    const a = center(from), b = center(to);
+    g.style.left = (a.x - cw / 2) + "px"; g.style.top = (a.y - cw * .7) + "px";
+    document.body.appendChild(g);
+    const anim = g.animate([
+      { transform: "translate(0,0) rotate(0deg)", opacity: 0 },
+      { transform: "translate(0,0) rotate(0deg)", opacity: 1, offset: .1 },
+      { transform: `translate(${b.x - a.x}px, ${b.y - a.y}px) rotate(${(Math.random() * 30 - 15).toFixed(0)}deg) scale(.7)`, opacity: .15 }
+    ], { duration: 560, delay: delay || 0, easing: "cubic-bezier(.3,.7,.3,1)", fill: "both" });
+    anim.onfinish = () => g.remove();
+  }
+  function deckRect() { const d = document.querySelector("#g-deckpile .stack .card:last-child") || $("g-deckpile"); return d && d.getBoundingClientRect(); }
+  function seatRect(p) {
+    if (app.view && p === app.view.me) return $("g-hand").getBoundingClientRect();
+    const el = document.querySelector(`.opp[data-seat="${p}"] .backs`) || document.querySelector(`.opp[data-seat="${p}"]`);
+    return el && el.getBoundingClientRect();
   }
   let current = "home", portraitOk = false;
   function show(screen) { current = screen; ["home", "room", "game"].forEach(id => { $(id).hidden = id !== screen; }); layout(); }
@@ -72,6 +118,19 @@
   }
 
   /* ---------- home screen ---------- */
+  (function heroFan() {
+    const cards = ["J♣", "Q♥", "K♠", "A♦"];
+    $("hero-fan").innerHTML = cards.map((c, i) => {
+      const k = i - 1.5;
+      return cardHTML(c, "", "", `transform:translateX(-50%) rotate(${k * 13}deg) translateY(${Math.abs(k) * 6}px);animation-delay:${i * 0.12}s`);
+    }).join("");
+  })();
+  const GOAT = `<svg viewBox="0 0 64 64" aria-hidden="true"><g fill="none" stroke="#b3121f" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M25 20C20 10 12 7 6 9c6 1 10 6 12 13"/><path d="M39 20c5-10 13-13 19-11-6 1-10 6-12 13"/>
+    <path d="M18 24l-9 3 8 4M46 24l9 3-8 4"/>
+    <path d="M20 24c2-6 22-6 24 0l-3 18c-1 6-5 9-9 9s-8-3-9-9z" fill="#fbf6ea"/>
+    <path d="M28 50l4 10 4-10"/><circle cx="26" cy="31" r="1.6" fill="#b3121f"/><circle cx="38" cy="31" r="1.6" fill="#b3121f"/>
+    <path d="M29 43h6"/></g></svg>`;
   $("name").value = store.get("kozel-name", "");
   $("name").addEventListener("input", () => store.set("kozel-name", $("name").value.trim()));
   function myName() { return ($("name").value.trim() || "Player").slice(0, 16); }
@@ -354,13 +413,17 @@
     // trump bar
     const SN = { "♠": "Spades", "♥": "Hearts", "♦": "Diamonds", "♣": "Clubs" };
     $("g-deal").textContent = v.dealNo || "–";
+    if (!v.dealNo) { $("g-trump").textContent = "—"; $("g-deck").textContent = "Revealed after the deal."; $("g-deckpile").innerHTML = ""; }
     if (v.dealNo) {
-      $("g-trump").textContent = v.trump + " " + SN[v.trump];
+      $("g-trump").innerHTML = v.trump + "\uFE0E " + SN[v.trump];
       $("g-trump").className = "tb-suit" + (RED(v.trump) ? " red" : "");
-      $("g-faceup").innerHTML = cardHTML(v.firstFaceUp, "sm", v.faceUp ? "" : "taken") + `<small>${v.faceUp ? "face up" : "taken"}</small>`;
-      $("g-hidden").innerHTML = v.hiddenCard
-        ? cardHTML(v.hiddenCard, "sm") + `<small>hidden card</small>`
-        : cardHTML("back", "sm") + `<small>hidden</small>`;
+      const left = v.stockCount - (v.faceUp ? 1 : 0) - (v.hiddenInStock ? 1 : 0);
+      const layers = Math.min(5, Math.max(0, Math.ceil(left / 5)));
+      $("g-deckpile").innerHTML =
+        `<div class="pilebox"><div class="under ${v.faceUp ? "" : "taken"}">${cardHTML(v.firstFaceUp, "", "")}</div>` +
+        `<div class="stack">${Array.from({ length: layers }, (_, i) => cardHTML("back", "", "", `left:${i * 1.5}px;top:${-i * 1.5}px`)).join("")}</div>` +
+        (left > 0 ? `<div class="count"><span>${left}</span></div>` : "") + `</div>` +
+        `<div class="hid">${v.hiddenCard ? cardHTML(v.hiddenCard, "", fx.trumpChanged ? "flip" : "") : v.hiddenInStock ? cardHTML("back") : ""}<small>${v.hiddenCard ? "hidden card" : v.hiddenInStock ? "hidden" : ""}</small></div>`;
       $("g-deck").textContent = v.stockCount
         ? v.stockCount + " card" + (v.stockCount === 1 ? "" : "s") + " left in the deck" + (v.hiddenInStock ? ". The last one is hidden and can change the trump." : "")
         : (v.hiddenCard && v.trump !== E.suitOf(v.firstFaceUp) ? "Deck is empty. The hidden card changed the trump." : "Deck is empty.");
@@ -384,16 +447,56 @@
       const team = v.teams ? `<span class="${sideCls(p.side)}" style="font-size:.75rem">${partner ? "partner" : "Team " + (p.side === 0 ? "A" : "B")}</span>` : "";
       const d = fx.draws.find(x => x.p === i);
       const drew = d ? ` <span class="badge">draws ${d.n}</span>` : "";
-      const turnTag = waiting === i ? ` <span class="badge gold">${v.phase === "lead" ? "leading" : "thinking"}</span>` : "";
-      return `<div class="opp ${waiting === i ? "turn" : ""}"><div class="nm"><span>${esc(p.name)}${p.bot ? ' <span class="muted" style="font-size:.75rem">bot</span>' : ""}${turnTag}${drew}</span>${team}</div>
-        <div class="backs">${Array(p.count).fill(cardHTML("back", "xs")).join("") || '<span class="muted" style="font-size:.8rem">no cards</span>'}</div></div>`;
+      const turnTag = waiting === i ? ` <span class="badge gold pulse">${v.phase === "lead" ? "leading" : "thinking"}</span>` : "";
+      return `<div class="opp ${waiting === i ? "turn" : ""}" data-seat="${i}"><div class="nm"><span>${esc(p.name)}${p.bot ? ' <span class="muted" style="font-size:.75rem">bot</span>' : ""}${turnTag}${drew}</span>${team}</div>
+        <div class="backs">${Array.from({ length: p.count }, (_, k) => cardHTML("back", "", "", `--i:${k};--n:${p.count}`)).join("") || '<span class="muted" style="font-size:.8rem">no cards</span>'}</div></div>`;
     }).join("");
 
+    const newDeal = !!(v.dealNo && (!prev || prev.dealNo !== v.dealNo) && ["lead", "answer"].includes(v.phase));
     renderTable(v, fx);
     renderControls(v, fx);
+    requestAnimationFrame(() => motion(v, fx, newDeal));
 
     $("g-log").innerHTML = v.log.slice().reverse().map(l => `<div>${esc(l)}</div>`).join("");
     renderOverlay(v);
+  }
+
+  function motion(v, fx, newDeal) {
+    const deck = deckRect();
+    if (newDeal) {
+      // deal: 4 cards to every seat, one at a time around the table
+      const order = [...Array(v.n).keys()].map(k => (v.turn.leader + k) % v.n);
+      let t = 0;
+      for (let r = 0; r < 4; r++) for (const p of order) {
+        if (p === v.me) {
+          const el = document.querySelectorAll("#g-hand .card")[r];
+          if (el) flyIn(el, deck, t, -30);
+        } else ghost(deck, seatRect(p), t, 30);
+        t += 90;
+      }
+      return;
+    }
+    // cards just played fly in from the player's seat (or from your hand)
+    document.querySelectorAll("#g-table .grp.enter").forEach((g, gi) => {
+      const p = +g.dataset.p;
+      g.querySelectorAll(".card").forEach((el, ci) => {
+        const from = (p === v.me && app.handRects && app.handRects[el.dataset.card]) || seatRect(p);
+        flyIn(el, from, ci * 70, p === v.me ? 0 : -18);
+      });
+    });
+    // after a turn: everyone draws from the deck, winner first
+    if (fx.turnDone && fx.draws.length) {
+      let t = 500;
+      for (const d of fx.draws) {
+        for (let j = 0; j < d.n; j++) {
+          if (d.p === v.me) {
+            const els = [...document.querySelectorAll("#g-hand .card")].filter(el => fx.drawnCards.includes(el.dataset.card));
+            if (els[j]) flyIn(els[j], deck, t, -25);
+          } else ghost(deck, seatRect(d.p), t, 30);
+          t += 120;
+        }
+      }
+    }
   }
 
   function playRows(plays, winner, fx, done) {
@@ -401,9 +504,8 @@
       const label = pl.kind === "lead" ? "led" : pl.kind === "beat" ? "beats" : "face down";
       const isWin = winner === pl.p;
       const cls = ["grp", isWin ? "win" : "", idx >= fx.newFrom && !done ? "enter" : "", isWin && done && fx.turnDone ? "fresh" : ""].join(" ");
-      const delay = done ? 0 : Math.max(0, idx - fx.newFrom) * 0.15;
       return (idx ? `<span class="arrow" aria-hidden="true">›</span>` : "") +
-        `<div class="${cls}" style="animation-delay:${delay}s"><div class="gl">${esc(nameOf(pl.p))} <small>${label}</small>${isWin && done ? '<span class="tag-win">WINS</span>' : ""}</div>
+        `<div class="${cls}" data-p="${pl.p}"><div class="gl">${esc(nameOf(pl.p))} <small>${label}</small>${isWin && done ? '<span class="tag-win">WINS</span>' : ""}</div>
         <div class="gc">${pl.cards.map(c => cardHTML(c, "sm")).join("")}</div></div>`;
     }).join("") + `</div>`;
   }
@@ -483,10 +585,10 @@
     $("g-status").className = "status" + (mine ? " mine" : "");
     $("g-actions").innerHTML = buttons.join("") + (hint ? `<span class="hint">${hint}</span>` : "");
     $("g-hand").className = "hand" + (mine || v.canFour ? "" : " off");
-    $("g-hand").innerHTML = hand.map((c, i) => {
-      const isNew = (fx.drawnCards || []).includes(c);
-      return cardHTML(c, "", (app.selected.has(c) ? "sel " : "") + (isNew ? "drawn" : "")).replace('class="card', isNew ? `style="animation-delay:${i * 0.08}s" class="card` : 'class="card');
-    }).join("") || `<span class="muted">No cards in hand.</span>`;
+    const n = hand.length;
+    $("g-hand").innerHTML = hand.map((c, i) =>
+      cardHTML(c, "", app.selected.has(c) ? "sel" : "", `--i:${i};--n:${n};--d:${Math.abs(i - (n - 1) / 2).toFixed(2)}`)
+    ).join("") || `<span class="none">No cards in hand.</span>`;
   }
 
   $("g-hand").addEventListener("click", e => {
@@ -498,6 +600,8 @@
   $("g-actions").addEventListener("click", e => {
     const b = e.target.closest("[data-act]"); if (!b || b.disabled) return;
     const type = b.dataset.act, v = app.view;
+    app.handRects = {};
+    document.querySelectorAll("#g-hand [data-card]").forEach(el => { app.handRects[el.dataset.card] = el.getBoundingClientRect(); });
     if (type === "four") act({ type: "four" });
     else if (type === "throw") {
       const k = v.turn.plays[0].cards.length;
@@ -511,9 +615,9 @@
 
   /* ---------- overlays ---------- */
   function optLabel(o) {
-    if (o === "red") return `<span style="color:var(--red)">Red</span> ♥♦`;
-    if (o === "black") return "Black ♠♣";
-    return o;
+    if (o === "red") return `<span class="sym red">Red ♥\uFE0E♦\uFE0E</span>`;
+    if (o === "black") return `<span class="sym">Black ♠\uFE0E♣\uFE0E</span>`;
+    return sym(o);
   }
   function pileHTML(v) {
     const pile = v.myPile;
@@ -524,7 +628,7 @@
       const cs = pile.filter(c => E.suitOf(c) === su).sort((a, b) => E.power(b) - E.power(a));
       if (!cs.length) return "";
       const pts = E.sum(cs);
-      return `<div class="pile-row"><span class="pile-suit ${RED(su) ? "red" : ""}">${su}${su === v.trump ? '<small>trump</small>' : ""}</span>
+      return `<div class="pile-row"><span class="pile-suit ${RED(su) ? "red" : ""}">${su}\uFE0E${su === v.trump ? '<small>trump</small>' : ""}</span>
         <div class="pile-cards">${cs.map(c => cardHTML(c, "sm", E.pts(c) ? "" : "zero")).join("")}</div>
         <span class="pile-pts mono">${pts}</span></div>`;
     }).join("");
@@ -546,7 +650,7 @@
           html += `<div class="opts">${pk.remaining.map(o => `<button type="button" class="opt ${o === "red" || RED(o) ? "red" : ""} ${o.length > 1 ? "wide" : ""}" data-pick="${o}">${optLabel(o)}</button>`).join("")}</div>`;
         } else html += `<p>Waiting for ${esc(v.players[pk.current].name)} to pick…</p>`;
       } else {
-        html += `<div class="row">${cardHTML(pk.card)}<div><strong>${esc(nameOf(pk.winner))}</strong> goes first.<br><span class="muted">Dealing…</span></div></div>`;
+        html += `<div class="row">${cardHTML(pk.card, "lg", "pick-card")}<div><strong>${esc(nameOf(pk.winner))}</strong> goes first.<br><span class="muted">Dealing…</span></div></div>`;
       }
     } else if (v.phase === "dealEnd" || v.phase === "gameOver") {
       const r = v.lastResult;
@@ -554,7 +658,7 @@
       html = `<span class="eyebrow">Deal ${r.deal} result</span>`;
       if (v.phase === "gameOver") {
         const g = v.goat || [];
-        html += g.length ? `<div class="goat">Козёл!</div><h2>${g.map(i => esc(v.sideNames[i])).join(" & ")} ${g.length > 1 || v.teams ? "are" : "is"} the goat.</h2>`
+        html += g.length ? `<div class="goat">${GOAT}Козёл!</div><h2>${g.map(i => esc(v.sideNames[i])).join(" & ")} ${g.length > 1 || v.teams ? "are" : "is"} the goat.</h2>`
                          : `<h2>No goat this time.</h2>`;
       } else html += `<h2>Deal over</h2>`;
       if (r.eggs) html += `<p class="warn">60 : 60, eggs! Nobody gets bad points. Next deal counts double.</p>`;
